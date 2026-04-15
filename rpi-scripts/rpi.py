@@ -12,7 +12,23 @@ import asyncio
 import socket
 from datetime import datetime
 
-# ── Optional: food filtering via ocr_scanner ──────────────────────────────────
+# ── Preferences ───────────────────────────────────────────────────────────────
+PREFS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'preferences.json')
+
+def load_prefs():
+    """
+    Load food preferences from the shared cache file written by bt_server.py.
+    Returns empty lists if the file does not exist or cannot be parsed.
+    Called fresh on every food-label scan so updates from the app are picked up
+    without restarting rpi.py.
+    """
+    try:
+        with open(PREFS_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {"preferred": [], "allergies": []}
+
+# ── Optional OCR scanner ──────────────────────────────────────────────────────
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     import ocr_scanner
@@ -56,61 +72,8 @@ def _get_client():
     print("[INFO] Gemini client initialised")
     return _genai_client
 
-# ── Camera ────────────────────────────────────────────────────────────────────
-picam2 = Picamera2()
-config = picam2.create_still_configuration(
-    main={"size": (1920, 1080)},
-    transform=Transform(vflip=True, hflip=True)
-)
-picam2.configure(config)
-picam2.start()
-time.sleep(2)
 
-try:
-    picam2.set_controls({"AfMode": controls.AfModeEnum.Continuous})
-    time.sleep(1.0)
-    print("[INFO] Autofocus enabled (continuous mode)")
-except Exception as e:
-    print(f"[INFO] Autofocus not available: {e}")
-
-# ── Pins ──────────────────────────────────────────────────────────────────────
-TRIG1, ECHO1 = 27, 22
-TRIG2, ECHO2 = 17, 18
-TRIG3, ECHO3 = 5, 6
-TRIG4, ECHO4 = 21, 20
-
-MOTOR1 = 4
-MOTOR2 = 13
-MOTOR3 = 26
-MOTOR4 = 19
-
-BTN_LEFT   = 12
-BTN_MIDDLE = 0
-BTN_RIGHT  = 25
-
-# ── Constants ─────────────────────────────────────────────────────────────────
-SPEED   = 34300
-TIMEOUT = 0.04
-
-# ── GPIO setup ────────────────────────────────────────────────────────────────
-GPIO.setmode(GPIO.BCM)
-
-for trig in [TRIG1, TRIG2, TRIG3, TRIG4]:
-    GPIO.setup(trig, GPIO.OUT)
-    GPIO.output(trig, False)
-
-for echo in [ECHO1, ECHO2, ECHO3, ECHO4]:
-    GPIO.setup(echo, GPIO.IN)
-
-for m in [MOTOR1, MOTOR2, MOTOR3, MOTOR4]:
-    GPIO.setup(m, GPIO.OUT)
-    GPIO.output(m, GPIO.LOW)
-
-GPIO.setup(BTN_LEFT,   GPIO.IN, pull_up_down=GPIO.PUD_UP)
-GPIO.setup(BTN_MIDDLE, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-GPIO.setup(BTN_RIGHT,  GPIO.IN, pull_up_down=GPIO.PUD_UP)
-
-# ── Functions ─────────────────────────────────────────────────────────────────
+# ── TTS ───────────────────────────────────────────────────────────────────────
 
 async def speak_text(text):
     try:
@@ -119,46 +82,51 @@ async def speak_text(text):
         import pygame
 
         cyrillic_count = sum(1 for ch in text if '\u0400' <= ch <= '\u04FF')
-        voice = "bg-BG-BorislavNeural" if len(text) > 0 and cyrillic_count / len(text) > 0.2 else "en-US-AriaNeural"
+        voice = ("bg-BG-BorislavNeural"
+                 if len(text) > 0 and cyrillic_count / len(text) > 0.2
+                 else "en-US-AriaNeural")
+
+        # ttsSpeed is stored as 0–200 (100 = normal).
+        # edge_tts expects a rate like "+0%", "+50%", "-30%".
+        tts_speed = load_prefs().get('ttsSpeed', 100.0)
+        rate = f"{int(tts_speed - 100):+d}%"
 
         audio_file = "/tmp/tts_audio.mp3"
-        communicate = edge_tts.Communicate(text, voice=voice)
+        communicate = edge_tts.Communicate(text, voice=voice, rate=rate)
         await communicate.save(audio_file)
 
         pygame.mixer.init()
         pygame.mixer.music.load(audio_file)
         pygame.mixer.music.play()
-
         while pygame.mixer.music.get_busy():
             await asyncio.sleep(0.1)
-
         pygame.mixer.music.unload()
         pygame.mixer.quit()
 
         if os.path.exists(audio_file):
             os.remove(audio_file)
-
     except Exception as e:
         print(f"[TTS] Error: {e}")
 
 
-def get_distance(trig, echo):
+# ── Sensors ───────────────────────────────────────────────────────────────────
+
+def get_distance(trig, echo, speed=34300, timeout=0.04):
     GPIO.output(trig, False)
     time.sleep(0.000002)
     GPIO.output(trig, True)
     time.sleep(0.00001)
     GPIO.output(trig, False)
 
-    timeout = time.time() + TIMEOUT
+    deadline = time.time() + timeout
     while GPIO.input(echo) == 0:
-        if time.time() > timeout:
+        if time.time() > deadline:
             return -1
     start = time.time()
     while GPIO.input(echo) == 1:
-        if time.time() > timeout:
+        if time.time() > deadline:
             return -1
-    end = time.time()
-    return (end - start) * SPEED / 2
+    return (time.time() - start) * speed / 2
 
 
 def has_internet(host="generativelanguage.googleapis.com", port=443, timeout=2.0):
@@ -169,9 +137,11 @@ def has_internet(host="generativelanguage.googleapis.com", port=443, timeout=2.0
         return False
 
 
-def capture_and_send(prompt) -> str | None:
-    """Capture image, query Gemini, speak the response. Returns the response text."""
-    print(f"[BTN] Capturing image...")
+# ── Gemini ────────────────────────────────────────────────────────────────────
+
+def capture_and_send(picam2, prompt):
+    """Capture an image, query Gemini, speak the response. Returns response text."""
+    print("[BTN] Capturing image...")
     path = f"/tmp/img_{datetime.now().strftime('%H%M%S')}.jpg"
     picam2.capture_file(path)
 
@@ -198,14 +168,13 @@ def capture_and_send(prompt) -> str | None:
                     "role": "user",
                     "parts": [
                         {"text": prompt},
-                        {"inline_data": {"mime_type": "image/jpeg", "data": img}}
-                    ]
-                }]
+                        {"inline_data": {"mime_type": "image/jpeg", "data": img}},
+                    ],
+                }],
             )
             print(f"[AI] {response.text[:120]}")
             asyncio.run(speak_text(response.text))
             return response.text
-
         except Exception as e:
             print(f"[BTN] Gemini error (attempt {attempt + 1}/2): {e}")
             if attempt == 0:
@@ -215,21 +184,17 @@ def capture_and_send(prompt) -> str | None:
     return None
 
 
-def scan_food_label():
+# ── Food label scan ───────────────────────────────────────────────────────────
+
+def scan_food_label(picam2):
     """
-    Left-button: read food label via Gemini with allergen/preference context,
-    filter the response programmatically, speak the result, and forward a
-    structured SCAN_RESULT to the mobile app via bt_server.py stdout relay.
+    Left-button: read food label via Gemini with allergen/preference context.
+    Preferences are loaded fresh from disk on every call so that updates sent
+    by the app via bt_server are picked up without restarting rpi.py.
     """
     print("[BTN] Left pressed — food label scan")
 
-    prefs = {"preferred": [], "allergies": []}
-    if OCR_AVAILABLE:
-        try:
-            prefs = ocr_scanner.load_preferences()
-        except Exception as e:
-            print(f"[PREFS] Could not load: {e}")
-
+    prefs    = load_prefs()
     allergens = prefs.get("allergies", [])
     preferred = prefs.get("preferred", [])
     print(f"[PREFS] {len(allergens)} allergen(s), {len(preferred)} preferred food(s)")
@@ -254,7 +219,7 @@ def scan_food_label():
             "Finish with БЕЗОПАСНО if no allergens found, or ВНИМАНИЕ АЛЕРГЕНИ if allergens found."
         )
 
-    response_text = capture_and_send(" ".join(prompt_parts))
+    response_text = capture_and_send(picam2, " ".join(prompt_parts))
     if response_text is None:
         return
 
@@ -269,34 +234,27 @@ def scan_food_label():
             "raw_text": response_text[:500],
         }
 
-    # bt_server.py reads our stdout and forwards BT:-prefixed lines to the app
+    # bt_server.py reads stdout and forwards BT:-prefixed lines to the app
     print(f"BT:SCAN_RESULT:{json.dumps(result, ensure_ascii=False)}", flush=True)
 
 
 # ── Vibration helpers ─────────────────────────────────────────────────────────
 
 def vibrate_once(pin):
-    GPIO.output(pin, GPIO.HIGH)
-    time.sleep(0.15)
-    GPIO.output(pin, GPIO.LOW)
+    GPIO.output(pin, GPIO.HIGH); time.sleep(0.15); GPIO.output(pin, GPIO.LOW)
 
 def vibrate_twice(pin):
     for _ in range(2):
-        GPIO.output(pin, GPIO.HIGH)
-        time.sleep(0.12)
-        GPIO.output(pin, GPIO.LOW)
-        time.sleep(0.12)
+        GPIO.output(pin, GPIO.HIGH); time.sleep(0.12)
+        GPIO.output(pin, GPIO.LOW);  time.sleep(0.12)
 
 def vibrate_continuous(pin, duration=1.0):
-    GPIO.output(pin, GPIO.HIGH)
-    time.sleep(duration)
-    GPIO.output(pin, GPIO.LOW)
+    GPIO.output(pin, GPIO.HIGH); time.sleep(duration); GPIO.output(pin, GPIO.LOW)
 
 def handle_vibration(distance, motor_pin):
     if distance <= 0 or distance == -1:
         GPIO.output(motor_pin, GPIO.LOW)
-        return
-    if distance < 20:
+    elif distance < 20:
         vibrate_continuous(motor_pin)
     elif distance < 50:
         vibrate_twice(motor_pin)
@@ -305,81 +263,139 @@ def handle_vibration(distance, motor_pin):
     else:
         GPIO.output(motor_pin, GPIO.LOW)
 
-# ── Main loop ─────────────────────────────────────────────────────────────────
-print("[INFO] System ready — waiting for button presses")
 
-sensors_on   = False
-last_time    = time.time()
+# ── Main ──────────────────────────────────────────────────────────────────────
 
-DEBOUNCE_SEC      = 0.35
-last_left_press   = 0.0
-last_middle_press = 0.0
-last_right_press  = 0.0
+def main():
+    # ── Camera ────────────────────────────────────────────────────────────────
+    picam2 = Picamera2()
+    config = picam2.create_still_configuration(
+        main={"size": (1920, 1080)},
+        transform=Transform(vflip=True, hflip=True),
+    )
+    picam2.configure(config)
+    picam2.start()
+    time.sleep(2)
 
-prev_left   = GPIO.input(BTN_LEFT)
-prev_middle = GPIO.input(BTN_MIDDLE)
-prev_right  = GPIO.input(BTN_RIGHT)
+    try:
+        picam2.set_controls({"AfMode": controls.AfModeEnum.Continuous})
+        time.sleep(1.0)
+        print("[INFO] Autofocus enabled (continuous mode)")
+    except Exception as e:
+        print(f"[INFO] Autofocus not available: {e}")
 
-try:
-    while True:
-        now          = time.time()
-        left_state   = GPIO.input(BTN_LEFT)
-        middle_state = GPIO.input(BTN_MIDDLE)
-        right_state  = GPIO.input(BTN_RIGHT)
+    # ── Pins ──────────────────────────────────────────────────────────────────
+    TRIG1, ECHO1 = 27, 22
+    TRIG2, ECHO2 = 17, 18
+    TRIG3, ECHO3 = 5,  6
+    TRIG4, ECHO4 = 21, 20
 
-        # ── TEXT / FOOD LABEL MODE ────────────────────────────────────────────
-        if left_state == GPIO.LOW and prev_left == GPIO.HIGH and now - last_left_press >= DEBOUNCE_SEC:
-            last_left_press = now
-            scan_food_label()
+    MOTOR1, MOTOR2, MOTOR3, MOTOR4 = 4, 13, 26, 19
 
-        # ── SCENE MODE ────────────────────────────────────────────────────────
-        if middle_state == GPIO.LOW and prev_middle == GPIO.HIGH and now - last_middle_press >= DEBOUNCE_SEC:
-            last_middle_press = now
-            print("[BTN] Middle pressed — scene description")
-            capture_and_send(
-                "Answer ONLY in Bulgarian. "
-                "1-2 sentence description of the scene. "
-                "Say only important and useful things. "
-                "Ignore small or unclear details."
-            )
+    BTN_LEFT   = 12
+    BTN_MIDDLE = 0
+    BTN_RIGHT  = 25
 
-        # ── SENSOR TOGGLE ─────────────────────────────────────────────────────
-        if right_state == GPIO.LOW and prev_right == GPIO.HIGH and now - last_right_press >= DEBOUNCE_SEC:
-            last_right_press = now
-            sensors_on = not sensors_on
-            print(f"[BTN] Right pressed — sensors {'ON' if sensors_on else 'OFF'}")
+    # ── GPIO setup ────────────────────────────────────────────────────────────
+    GPIO.setmode(GPIO.BCM)
 
-        # ── DISTANCE SENSORS ──────────────────────────────────────────────────
-        if sensors_on and time.time() - last_time > 1:
-            d1 = get_distance(TRIG1, ECHO1); time.sleep(0.2)
-            d2 = get_distance(TRIG2, ECHO2); time.sleep(0.2)
-            d3 = get_distance(TRIG3, ECHO3); time.sleep(0.2)
-            d4 = get_distance(TRIG4, ECHO4); time.sleep(0.2)
+    for trig in [TRIG1, TRIG2, TRIG3, TRIG4]:
+        GPIO.setup(trig, GPIO.OUT)
+        GPIO.output(trig, False)
 
-            print(f"\rS1:{d1:.1f} S2:{d2:.1f} S3:{d3:.1f} S4:{d4:.1f} ", end="")
+    for echo in [ECHO1, ECHO2, ECHO3, ECHO4]:
+        GPIO.setup(echo, GPIO.IN)
 
-            handle_vibration(d1, MOTOR1)
-            handle_vibration(d2, MOTOR2)
-            handle_vibration(d3, MOTOR3)
-            handle_vibration(d4, MOTOR4)
+    for m in [MOTOR1, MOTOR2, MOTOR3, MOTOR4]:
+        GPIO.setup(m, GPIO.OUT)
+        GPIO.output(m, GPIO.LOW)
 
-            last_time = time.time()
+    GPIO.setup(BTN_LEFT,   GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.setup(BTN_MIDDLE, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.setup(BTN_RIGHT,  GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
-        prev_left   = left_state
-        prev_middle = middle_state
-        prev_right  = right_state
+    # ── Log startup preferences ───────────────────────────────────────────────
+    prefs = load_prefs()
+    print(f"[INFO] Startup preferences: "
+          f"{len(prefs.get('preferred', []))} preferred, "
+          f"{len(prefs.get('allergies', []))} allergies")
+    print("[INFO] System ready — waiting for button presses")
 
-        if not sensors_on:
-            GPIO.output(MOTOR1, GPIO.LOW)
-            GPIO.output(MOTOR2, GPIO.LOW)
-            GPIO.output(MOTOR3, GPIO.LOW)
-            GPIO.output(MOTOR4, GPIO.LOW)
+    # ── Main loop ─────────────────────────────────────────────────────────────
+    DEBOUNCE_SEC = 0.35
+    sensors_on   = False
+    last_time    = time.time()
 
-        time.sleep(0.02)
+    last_left_press   = 0.0
+    last_middle_press = 0.0
+    last_right_press  = 0.0
 
-except KeyboardInterrupt:
-    pass
+    prev_left   = GPIO.input(BTN_LEFT)
+    prev_middle = GPIO.input(BTN_MIDDLE)
+    prev_right  = GPIO.input(BTN_RIGHT)
 
-finally:
-    GPIO.cleanup()
-    picam2.stop()
+    try:
+        while True:
+            now          = time.time()
+            left_state   = GPIO.input(BTN_LEFT)
+            middle_state = GPIO.input(BTN_MIDDLE)
+            right_state  = GPIO.input(BTN_RIGHT)
+
+            # ── TEXT / FOOD LABEL ─────────────────────────────────────────────
+            if (left_state == GPIO.LOW and prev_left == GPIO.HIGH
+                    and now - last_left_press >= DEBOUNCE_SEC):
+                last_left_press = now
+                scan_food_label(picam2)
+
+            # ── SCENE DESCRIPTION ─────────────────────────────────────────────
+            if (middle_state == GPIO.LOW and prev_middle == GPIO.HIGH
+                    and now - last_middle_press >= DEBOUNCE_SEC):
+                last_middle_press = now
+                print("[BTN] Middle pressed — scene description")
+                capture_and_send(
+                    picam2,
+                    "Answer ONLY in Bulgarian. "
+                    "1-2 sentence description of the scene. "
+                    "Say only important and useful things. "
+                    "Ignore small or unclear details.",
+                )
+
+            # ── SENSOR TOGGLE ─────────────────────────────────────────────────
+            if (right_state == GPIO.LOW and prev_right == GPIO.HIGH
+                    and now - last_right_press >= DEBOUNCE_SEC):
+                last_right_press = now
+                sensors_on = not sensors_on
+                print(f"[BTN] Right pressed — sensors {'ON' if sensors_on else 'OFF'}")
+
+            # ── DISTANCE SENSORS ──────────────────────────────────────────────
+            if sensors_on and time.time() - last_time > 1:
+                d1 = get_distance(TRIG1, ECHO1); time.sleep(0.2)
+                d2 = get_distance(TRIG2, ECHO2); time.sleep(0.2)
+                d3 = get_distance(TRIG3, ECHO3); time.sleep(0.2)
+                d4 = get_distance(TRIG4, ECHO4); time.sleep(0.2)
+                print(f"\rS1:{d1:.1f} S2:{d2:.1f} S3:{d3:.1f} S4:{d4:.1f} ", end="")
+                handle_vibration(d1, MOTOR1)
+                handle_vibration(d2, MOTOR2)
+                handle_vibration(d3, MOTOR3)
+                handle_vibration(d4, MOTOR4)
+                last_time = time.time()
+
+            if not sensors_on:
+                for m in [MOTOR1, MOTOR2, MOTOR3, MOTOR4]:
+                    GPIO.output(m, GPIO.LOW)
+
+            prev_left   = left_state
+            prev_middle = middle_state
+            prev_right  = right_state
+
+            time.sleep(0.02)
+
+    except KeyboardInterrupt:
+        pass
+    finally:
+        GPIO.cleanup()
+        picam2.stop()
+
+
+if __name__ == "__main__":
+    main()
