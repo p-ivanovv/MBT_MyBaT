@@ -218,8 +218,7 @@ class SettingsManager {
 
 // API Service - Handles all backend API calls
 class ApiService {
-  static const String baseUrl =
-      'https://bdad-2a01-5a8-307-c9c-7c13-b42e-edb9-2980.ngrok-free.app/api';
+  static const String baseUrl = 'https://api.mybat.tech/api';
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;
   ApiService._internal();

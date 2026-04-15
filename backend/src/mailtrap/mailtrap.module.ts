@@ -1,12 +1,12 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 
-import { SendgridService } from './sendgrid.service';
+import { MailtrapService } from './mailtrap.service';
 
 @Module({
   controllers: [],
   imports: [ConfigModule],
-  providers: [SendgridService],
-  exports: [SendgridService],
+  providers: [MailtrapService],
+  exports: [MailtrapService],
 })
-export class SendgridModule {}
+export class MailtrapModule {}

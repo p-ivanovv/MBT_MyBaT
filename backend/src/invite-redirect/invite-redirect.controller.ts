@@ -18,7 +18,7 @@ export class InviteRedirectController {
     const mbtLink = `mbt://invite?token=${token}`;
     // Chrome on Android blocks JS redirects to custom schemes.
     // intent:// URI tells Chrome to launch the app directly.
-    const intentLink = `intent://invite?token=${token}#Intent;scheme=mbt;package=com.example.rpi_bridge;end`;
+    const intentLink = `intent://invite?token=${token}#Intent;scheme=mbt;package=tech.mybat.app;end`;
 
     return `<!DOCTYPE html>
 <html lang="en">

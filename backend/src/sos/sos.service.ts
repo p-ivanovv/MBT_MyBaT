@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { UserEntity } from 'src/users/entities';
 import { RelativeEntity } from 'src/relatives/entities';
-import { SendgridService } from 'src/sendgrid/sendgrid.service';
+import { MailtrapService } from 'src/mailtrap/mailtrap.service';
 
 import { SosDto } from './dtos/sos.dto';
 
@@ -14,7 +14,7 @@ export class SosService {
     private readonly relativesRepository: Repository<RelativeEntity>,
     @InjectRepository(UserEntity)
     private readonly usersRepository: Repository<UserEntity>,
-    private readonly sendgridService: SendgridService,
+    private readonly sendgridService: MailtrapService,
   ) {}
 
   async triggerSos(userId: string, dto: SosDto) {
