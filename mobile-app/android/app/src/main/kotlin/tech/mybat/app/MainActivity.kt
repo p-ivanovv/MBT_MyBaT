@@ -1,4 +1,4 @@
-package com.example.rpi_bridge
+package tech.mybat.app
 
 import io.flutter.embedding.android.FlutterActivity
 

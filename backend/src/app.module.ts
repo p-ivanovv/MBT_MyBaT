@@ -9,7 +9,7 @@ import { UsersModule } from './users/users.module';
 import { typeOrmAsyncConfig } from './config';
 import { AuthModule } from './auth/auth.module';
 import { SeedingModule } from './seeding/seeding.module';
-import { SendgridModule } from './sendgrid/sendgrid.module';
+import { MailtrapModule } from './mailtrap/mailtrap.module';
 import { RelativesModule } from './relatives/relatives.module';
 import { FoodModule } from './food/food.module';
 import { SosModule } from './sos/sos.module';
@@ -25,7 +25,7 @@ import { InviteRedirectModule } from './invite-redirect/invite-redirect.module';
     UsersModule,
     AuthModule,
     SeedingModule,
-    SendgridModule,
+    MailtrapModule,
     RelativesModule,
     FoodModule,
     SosModule,

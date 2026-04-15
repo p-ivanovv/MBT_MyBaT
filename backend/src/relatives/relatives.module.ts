@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
 import { UserEntity } from 'src/users/entities';
-import { SendgridModule } from 'src/sendgrid/sendgrid.module';
+import { MailtrapModule } from 'src/mailtrap/mailtrap.module';
 
 import { RelativeEntity, InvitationEntity } from './entities';
 import { RelativesService } from './relatives.service';
@@ -11,7 +11,7 @@ import { RelativesController } from './relatives.controller';
 @Module({
   imports: [
     TypeOrmModule.forFeature([RelativeEntity, UserEntity, InvitationEntity]),
-    SendgridModule,
+    MailtrapModule,
     ConfigModule,
   ],
   providers: [RelativesService],

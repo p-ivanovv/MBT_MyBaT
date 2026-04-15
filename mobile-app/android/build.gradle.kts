@@ -27,7 +27,7 @@ subprojects {
                     namespace = if (project.name == "flutter_bluetooth_serial") {
                         "io.github.edufolly.flutterbluetoothserial"
                     } else {
-                        "com.example.rpi_bridge.${project.name.replace('-', '_')}"
+                        "tech.mybat.app.${project.name.replace('-', '_')}"
                     }
                 }
             }

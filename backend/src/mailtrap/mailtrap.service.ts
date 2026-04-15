@@ -2,44 +2,34 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { MailDataRequired, MailService } from '@sendgrid/mail';
+import { MailtrapClient } from 'mailtrap';
 
-import { Templates } from './enum';
-import { SendgridErrorCodes } from './errors';
+import { MailtrapErrorCodes } from './errors';
 import { ResetPasswordType, SendInvitationType, SendSosType, SetPasswordType } from './types';
 
 @Injectable()
-export class SendgridService {
-  private readonly logger = new Logger(SendgridService.name);
-  private readonly sgMail = new MailService();
+export class MailtrapService {
+  private readonly logger = new Logger(MailtrapService.name);
+  private readonly client: MailtrapClient;
   private readonly from: string;
-  private readonly helpTemplateId = Templates.HelpTemplate;
 
   constructor(private readonly config: ConfigService) {
-    const apiKey = this.config.get<string>('SENDGRID_API_KEY');
-    this.sgMail.setApiKey(apiKey);
-    this.from = this.config.get<string>('SENDGRID_FROM');
+    const token = this.config.get<string>('MAILTRAP_API_TOKEN');
+    this.client = new MailtrapClient({ token });
+    this.from = this.config.get<string>('MAILTRAP_FROM');
   }
 
   async sendPasswordSetup(dto: SetPasswordType) {
-    const mail: MailDataRequired = {
-      from: this.from,
-      templateId: this.helpTemplateId,
-      subject: '',
+    const html = `
+      <p>Hi ${dto.username},</p>
+      <p>Please set up your password by clicking the link below:</p>
+      <p><a href="${dto.url}">Set Password</a></p>
+    `;
+    return await this.sendMail({
       to: dto.email,
-      personalizations: [
-        {
-          to: {
-            email: dto.email,
-          },
-          dynamicTemplateData: {
-            username: dto.username,
-            create_password_url: dto.url,
-          },
-        },
-      ],
-    };
-    return await this.sendMail(mail);
+      subject: 'Set up your password',
+      html,
+    });
   }
 
   async sendInvitation(dto: SendInvitationType) {
@@ -53,13 +43,11 @@ export class SendgridService {
       .replace(/\{\{relativeName\}\}/g, dto.relativeName)
       .replace(/\{\{inviteUrl\}\}/g, dto.inviteUrl);
 
-    const mail: MailDataRequired = {
-      from: this.from,
+    return await this.sendMail({
       to: dto.email,
       subject: `${dto.relativeName} invited you to join MBT`,
       html,
-    };
-    return await this.sendMail(mail);
+    });
   }
 
   async sendSos(dto: SendSosType) {
@@ -72,22 +60,25 @@ export class SendgridService {
       .replace(/\{\{alertTime\}\}/g, dto.alertTime)
       .replace(/\{\{mapsUrl\}\}/g, dto.mapsUrl);
 
-    const mail: MailDataRequired = {
-      from: this.from,
+    return await this.sendMail({
       to: dto.email,
       subject: `🚨 SOS Alert — ${dto.userName} needs help!`,
       html,
-    };
-    return await this.sendMail(mail);
+    });
   }
 
-  private async sendMail(mail: MailDataRequired) {
+  private async sendMail({ to, subject, html }: { to: string; subject: string; html: string }) {
     try {
-      await this.sgMail.send(mail);
-      this.logger.log(`Email sent to ${JSON.stringify(mail.to)}`);
+      await this.client.send({
+        from: { email: this.from },
+        to: [{ email: to }],
+        subject,
+        html,
+      });
+      this.logger.log(`Email sent to ${to}`);
     } catch (err) {
-      this.logger.error('Failed to send email', err?.response?.body || err);
-      throw new BadRequestException(SendgridErrorCodes.ErrorWhileSendingEmail);
+      this.logger.error('Failed to send email', err);
+      throw new BadRequestException(MailtrapErrorCodes.ErrorWhileSendingEmail);
     }
   }
 }

@@ -8,7 +8,7 @@ import { nanoid } from 'nanoid';
 import { Repository } from 'typeorm';
 import { UserEntity } from 'src/users/entities';
 import { UserRoles } from 'src/common';
-import { SendgridService } from 'src/sendgrid/sendgrid.service';
+import { MailtrapService } from 'src/mailtrap/mailtrap.service';
 import { ConfigService } from '@nestjs/config';
 
 import { RelativeEntity, InvitationEntity } from './entities';
@@ -26,7 +26,7 @@ export class RelativesService {
     private readonly usersRepository: Repository<UserEntity>,
     @InjectRepository(InvitationEntity)
     private readonly invitationsRepository: Repository<InvitationEntity>,
-    private readonly sendgridService: SendgridService,
+    private readonly sendgridService: MailtrapService,
     private readonly configService: ConfigService,
   ) {}
 
