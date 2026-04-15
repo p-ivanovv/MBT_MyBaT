@@ -288,6 +288,24 @@ class ApiService {
     throw ApiException(message, response.statusCode);
   }
 
+  // For login/register: never attempt token refresh on 401 — just report wrong credentials.
+  Future<Map<String, dynamic>> _handleAuthResponse(http.Response response) async {
+    debugPrint('📡 Auth Response [${response.statusCode}]: ${response.body}');
+
+    final body = _tryDecodeJson(response.body);
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return body is Map<String, dynamic> ? body : {'data': body};
+    }
+
+    if (response.statusCode == 401) {
+      throw ApiException('Incorrect email or password.', 401);
+    }
+
+    final message = _extractErrorMessage(response, body);
+    throw ApiException(message, response.statusCode);
+  }
+
   // Auth endpoints
   Future<Map<String, dynamic>> register({
     required String firstName,
@@ -306,7 +324,7 @@ class ApiService {
         'password': password,
       }),
     );
-    return _handleResponse(response);
+    return _handleAuthResponse(response);
   }
 
   Future<Map<String, dynamic>> login({
@@ -322,7 +340,7 @@ class ApiService {
         'password': password,
       }),
     );
-    return _handleResponse(response);
+    return _handleAuthResponse(response);
   }
 
   Future<bool> refreshTokens() async {
@@ -580,7 +598,6 @@ class AppLocalizations {
       'emailRequired': 'Email is required',
       'firstNameRequired': 'First name is required',
       'lastNameRequired': 'Last name is required',
-      'tempBypass': 'Temporary Bypass (Dev)',
       'createUser': 'Create User Account',
       'inviteExistingUser': 'Invite Existing User',
       'manageUsers': 'Manage Users',
@@ -693,7 +710,6 @@ class AppLocalizations {
       'emailRequired': 'Имейлът е задължителен',
       'firstNameRequired': 'Името е задължително',
       'lastNameRequired': 'Фамилията е задължителна',
-      'tempBypass': 'Временен Заобикаляне (Dev)',
       'createUser': 'Създай Потребител',
       'inviteExistingUser': 'Покани Съществуващ Потребител',
       'manageUsers': 'Управление на Потребители',
@@ -865,6 +881,7 @@ class _MyAppState extends State<MyApp> {
     return MaterialApp(
       navigatorKey: navigatorKey,
       title: 'MyBaT',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(primarySwatch: Colors.blue, useMaterial3: true),
       locale: _locale,
       supportedLocales: const [
@@ -1308,13 +1325,15 @@ class _BluetoothConnectionPageState extends State<BluetoothConnectionPage> {
             .map((a) => (a['name'] ?? '').toString())
             .where((s) => s.isNotEmpty)
             .toList(),
+        'ttsSpeed': SettingsManager().ttsSpeed,
       };
       final payload = 'PREFS:${jsonEncode(prefs)}\n';
       _connection!.output.add(Uint8List.fromList(payload.codeUnits));
       await _connection!.output.allSent;
       debugPrint('📤 Sent preferences to Pi — '
-          '${prefs['preferred']!.length} preferred, '
-          '${prefs['allergies']!.length} allergies');
+          '${(prefs['preferred'] as List).length} preferred, '
+          '${(prefs['allergies'] as List).length} allergies, '
+          'ttsSpeed=${prefs['ttsSpeed']}');
     } catch (e) {
       debugPrint('⚠️ Could not send preferences to Pi: $e');
     }
@@ -2477,20 +2496,6 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  void _handleBypass() {
-    // Temporary bypass for development - login as relative
-    SettingsManager().login(
-      'dev_relative',
-      email: 'dev@example.com',
-      firstName: 'Dev',
-      lastName: 'Relative',
-      role: 'relative',
-    );
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (context) => const MainScreen()),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
@@ -2739,18 +2744,6 @@ class _LoginPageState extends State<LoginPage> {
                           ],
                         ),
                         
-                        // Temporary Bypass Button (for development)
-                        const SizedBox(height: 8),
-                        OutlinedButton.icon(
-                          onPressed: _handleBypass,
-                          icon: const Icon(Icons.developer_mode, size: 16),
-                          label: Text(localizations.translate('tempBypass')),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.orange,
-                            side: const BorderSide(color: Colors.orange),
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                          ),
-                        ),
                       ],
                     ),
                   ),

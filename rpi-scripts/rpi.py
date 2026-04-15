@@ -86,8 +86,13 @@ async def speak_text(text):
                  if len(text) > 0 and cyrillic_count / len(text) > 0.2
                  else "en-US-AriaNeural")
 
+        # ttsSpeed is stored as 0–200 (100 = normal).
+        # edge_tts expects a rate like "+0%", "+50%", "-30%".
+        tts_speed = load_prefs().get('ttsSpeed', 100.0)
+        rate = f"{int(tts_speed - 100):+d}%"
+
         audio_file = "/tmp/tts_audio.mp3"
-        communicate = edge_tts.Communicate(text, voice=voice)
+        communicate = edge_tts.Communicate(text, voice=voice, rate=rate)
         await communicate.save(audio_file)
 
         pygame.mixer.init()
