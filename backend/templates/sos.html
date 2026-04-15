@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SOS Alert</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        background-color: #f4f6f9;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+          Helvetica, Arial, sans-serif;
+        color: #1a1a2e;
+      }
+
+      .wrapper {
+        max-width: 600px;
+        margin: 40px auto;
+        background-color: #ffffff;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+      }
+
+      .header {
+        background-color: #c0392b;
+        padding: 36px 40px;
+        text-align: center;
+      }
+
+      .header .sos-badge {
+        display: inline-block;
+        background-color: #ffffff;
+        color: #c0392b;
+        font-size: 22px;
+        font-weight: 900;
+        letter-spacing: 4px;
+        padding: 6px 20px;
+        border-radius: 6px;
+        margin-bottom: 16px;
+      }
+
+      .header h1 {
+        color: #ffffff;
+        font-size: 24px;
+        font-weight: 700;
+      }
+
+      .header p {
+        color: #f5b7b1;
+        font-size: 14px;
+        margin-top: 6px;
+      }
+
+      .body {
+        padding: 40px;
+      }
+
+      .body p {
+        font-size: 16px;
+        line-height: 1.7;
+        color: #4a5568;
+      }
+
+      .body p + p {
+        margin-top: 12px;
+      }
+
+      .highlight {
+        font-weight: 700;
+        color: #c0392b;
+      }
+
+      .info-box {
+        background-color: #fff5f5;
+        border-left: 4px solid #c0392b;
+        border-radius: 4px;
+        padding: 20px 24px;
+        margin: 28px 0;
+      }
+
+      .info-box .label {
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        color: #718096;
+        margin-bottom: 4px;
+      }
+
+      .info-box .value {
+        font-size: 16px;
+        font-weight: 600;
+        color: #1a1a2e;
+      }
+
+      .info-box .row + .row {
+        margin-top: 16px;
+      }
+
+      .cta-wrapper {
+        text-align: center;
+        margin: 32px 0 8px;
+      }
+
+      .cta-button {
+        display: inline-block;
+        background-color: #c0392b;
+        color: #ffffff !important;
+        text-decoration: none;
+        padding: 14px 36px;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+      }
+
+      .timestamp {
+        margin-top: 28px;
+        font-size: 13px;
+        color: #a0aec0;
+      }
+
+      .footer {
+        background-color: #f7fafc;
+        padding: 24px 40px;
+        text-align: center;
+        border-top: 1px solid #e2e8f0;
+      }
+
+      .footer p {
+        font-size: 13px;
+        color: #a0aec0;
+        line-height: 1.6;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrapper">
+      <div class="header">
+        <div class="sos-badge">SOS</div>
+        <h1>Emergency Alert</h1>
+        <p>Immediate attention required</p>
+      </div>
+
+      <div class="body">
+        <p>
+          <span class="highlight">{{userName}}</span> has triggered an SOS alert and may need your immediate assistance.
+        </p>
+        <p>Their last known location at the time of the alert is shown below.</p>
+
+        <div class="info-box">
+          <div class="row">
+            <div class="label">Person</div>
+            <div class="value">{{userName}}</div>
+          </div>
+          <div class="row">
+            <div class="label">Coordinates</div>
+            <div class="value">{{latitude}}, {{longitude}}</div>
+          </div>
+          <div class="row">
+            <div class="label">Time of Alert</div>
+            <div class="value">{{alertTime}}</div>
+          </div>
+        </div>
+
+        <div class="cta-wrapper">
+          <a href="{{mapsUrl}}" class="cta-button">Open in Google Maps</a>
+        </div>
+
+        <p class="timestamp">
+          If the button doesn't work, copy this link into your browser:<br />
+          <a href="{{mapsUrl}}">{{mapsUrl}}</a>
+        </p>
+      </div>
+
+      <div class="footer">
+        <p>This alert was sent automatically by the MBT App when the SOS button was pressed.</p>
+        <p style="margin-top: 8px">&copy; 2026 MBT App. All rights reserved.</p>
+      </div>
+    </div>
+  </body>
+</html>
