@@ -279,11 +279,15 @@ class ApiService {
     }
 
     final body = _tryDecodeJson(response.body);
-    
+
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return body is Map<String, dynamic> ? body : {'data': body};
     }
-    
+
+    if (response.statusCode >= 500) {
+      throw ApiException(_serverUnavailableOrMessage(body), response.statusCode);
+    }
+
     final message = _extractErrorMessage(response, body);
     throw ApiException(message, response.statusCode);
   }
@@ -298,12 +302,40 @@ class ApiService {
       return body is Map<String, dynamic> ? body : {'data': body};
     }
 
+    if (response.statusCode >= 500) {
+      throw ApiException(_serverUnavailableOrMessage(body), response.statusCode);
+    }
+
     if (response.statusCode == 401) {
       throw ApiException('Incorrect email or password.', 401);
     }
 
     final message = _extractErrorMessage(response, body);
     throw ApiException(message, response.statusCode);
+  }
+
+  // Returns a structured API error message if present, otherwise the server-unavailable fallback.
+  String _serverUnavailableOrMessage(dynamic body) {
+    if (body is Map<String, dynamic>) {
+      final msg = body['message'] ?? body['error'] ?? body['detail'];
+      if (msg is String && msg.isNotEmpty) return msg;
+      if (msg is List && msg.isNotEmpty) return msg.join(', ');
+    }
+    return 'The server is currently unavailable. Please try again later.';
+  }
+
+  // Wraps an HTTP call and converts network-level exceptions into ApiException
+  // so every caller gets a consistent, user-readable error type.
+  Future<http.Response> _execute(Future<http.Response> request) async {
+    try {
+      return await request;
+    } on SocketException {
+      throw ApiException('The server is currently unavailable. Please try again later.', 0);
+    } on TimeoutException {
+      throw ApiException('Connection timed out. Please try again.', 0);
+    } on HttpException {
+      throw ApiException('The server is currently unavailable. Please try again later.', 0);
+    }
   }
 
   // Auth endpoints
@@ -314,7 +346,7 @@ class ApiService {
     required String password,
   }) async {
     debugPrint('📤 Registering user: $email');
-    final response = await http.post(
+    final response = await _execute(http.post(
       Uri.parse('$baseUrl/auth/register'),
       headers: _headers,
       body: jsonEncode({
@@ -323,7 +355,7 @@ class ApiService {
         'email': email,
         'password': password,
       }),
-    );
+    ));
     return _handleAuthResponse(response);
   }
 
@@ -332,14 +364,14 @@ class ApiService {
     required String password,
   }) async {
     debugPrint('📤 Logging in: $email');
-    final response = await http.post(
+    final response = await _execute(http.post(
       Uri.parse('$baseUrl/auth/login'),
       headers: _headers,
       body: jsonEncode({
         'email': email,
         'password': password,
       }),
-    );
+    ));
     return _handleAuthResponse(response);
   }
 
@@ -379,19 +411,19 @@ class ApiService {
   // User endpoints
   Future<Map<String, dynamic>> getMe() async {
     debugPrint('📤 Getting current user profile');
-    final response = await http.get(
+    final response = await _execute(http.get(
       Uri.parse('$baseUrl/users/me'),
       headers: _authHeaders,
-    );
+    ));
     return _handleResponse(response);
   }
 
   Future<List<dynamic>> getMyRelatives() async {
     debugPrint('📤 Getting my relatives');
-    final response = await http.get(
+    final response = await _execute(http.get(
       Uri.parse('$baseUrl/users/my-relatives'),
       headers: _authHeaders,
-    );
+    ));
     final result = await _handleResponse(response);
     return result['data'] ?? result['relatives'] ?? [];
   }
@@ -404,7 +436,7 @@ class ApiService {
     required String password,
   }) async {
     debugPrint('📤 Creating blind user: $email');
-    final response = await http.post(
+    final response = await _execute(http.post(
       Uri.parse('$baseUrl/relatives'),
       headers: _authHeaders,
       body: jsonEncode({
@@ -413,96 +445,96 @@ class ApiService {
         'email': email,
         'password': password,
       }),
-    );
+    ));
     return _handleResponse(response);
   }
 
   Future<void> sendInvite({required String email}) async {
     debugPrint('📤 Sending invite to: $email');
-    final response = await http.post(
+    final response = await _execute(http.post(
       Uri.parse('$baseUrl/relatives/invite'),
       headers: _authHeaders,
       body: jsonEncode({'email': email}),
-    );
+    ));
     await _handleResponse(response);
   }
 
   Future<void> acceptInvite({required String token}) async {
     debugPrint('📤 Accepting invite with token');
-    final response = await http.post(
+    final response = await _execute(http.post(
       Uri.parse('$baseUrl/relatives/accept-invite'),
       headers: _authHeaders,
       body: jsonEncode({'token': token}),
-    );
+    ));
     await _handleResponse(response);
   }
 
   Future<void> removeRelativeLink({required String id}) async {
     debugPrint('📤 Removing relative link: $id');
-    final response = await http.delete(
+    final response = await _execute(http.delete(
       Uri.parse('$baseUrl/relatives/$id'),
       headers: _authHeaders,
-    );
+    ));
     await _handleResponse(response);
   }
 
   // Food endpoints - Preferred Foods
   Future<List<dynamic>> getPreferredFoods() async {
     debugPrint('📤 Getting preferred foods');
-    final response = await http.get(
+    final response = await _execute(http.get(
       Uri.parse('$baseUrl/food/preferred'),
       headers: _authHeaders,
-    );
+    ));
     final result = await _handleResponse(response);
     return result['data'] ?? result['foods'] ?? [];
   }
 
   Future<Map<String, dynamic>> addPreferredFood({required String name}) async {
     debugPrint('📤 Adding preferred food: $name');
-    final response = await http.post(
+    final response = await _execute(http.post(
       Uri.parse('$baseUrl/food/preferred'),
       headers: _authHeaders,
       body: jsonEncode({'name': name}),
-    );
+    ));
     return _handleResponse(response);
   }
 
   Future<void> deletePreferredFood({required String id}) async {
     debugPrint('📤 Deleting preferred food: $id');
-    final response = await http.delete(
+    final response = await _execute(http.delete(
       Uri.parse('$baseUrl/food/preferred/$id'),
       headers: _authHeaders,
-    );
+    ));
     await _handleResponse(response);
   }
 
   // Food endpoints - Allergies
   Future<List<dynamic>> getAllergies() async {
     debugPrint('📤 Getting allergies');
-    final response = await http.get(
+    final response = await _execute(http.get(
       Uri.parse('$baseUrl/food/allergies'),
       headers: _authHeaders,
-    );
+    ));
     final result = await _handleResponse(response);
     return result['data'] ?? result['allergies'] ?? [];
   }
 
   Future<Map<String, dynamic>> addAllergy({required String name}) async {
     debugPrint('📤 Adding allergy: $name');
-    final response = await http.post(
+    final response = await _execute(http.post(
       Uri.parse('$baseUrl/food/allergies'),
       headers: _authHeaders,
       body: jsonEncode({'name': name}),
-    );
+    ));
     return _handleResponse(response);
   }
 
   Future<void> deleteAllergy({required String id}) async {
     debugPrint('📤 Deleting allergy: $id');
-    final response = await http.delete(
+    final response = await _execute(http.delete(
       Uri.parse('$baseUrl/food/allergies/$id'),
       headers: _authHeaders,
-    );
+    ));
     await _handleResponse(response);
   }
 }
