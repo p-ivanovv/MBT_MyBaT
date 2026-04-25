@@ -19,7 +19,7 @@ The backend manages **authentication, user profiles, relative connections, SOS a
 └────────┬────────┘                         └──────────────────────┘
          │ HTTPS (REST API)
          ▼
-┌─────────────────┐        PostgreSQL        ┌──────────────────────┐
+┌─────────────────┐        PostgreSQL       ┌──────────────────────┐
 │  NestJS Backend │◄───────────────────────►│  Supabase Database   │
 │  (backend/)     │                         └──────────────────────┘
 └────────┬────────┘
